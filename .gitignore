@@ -1,0 +1,7 @@
+service_account.json
+client_secret*.json
+*.db
+__pycache__/
+downloads/
+*.csv
+*.XML
