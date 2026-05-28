@@ -37,12 +37,12 @@ print(f"Parsed {len(rows)} rows")
 df = pd.read_csv("laser_output.csv")
 
 
-# ---------- STEP 4 : BASIC DATA CLEANING ----------
+# ---------- STEP 4 : BASIC CLEANING ----------
 
 # Replace empty values
 df = df.fillna("")
 
-# Remove duplicate rows INSIDE current XML
+# Remove duplicate rows inside current XML
 df = df.drop_duplicates()
 
 # Clean column names
@@ -67,7 +67,7 @@ conn.close()
 print("SQLite updated")
 
 
-# ---------- STEP 6 : GOOGLE SHEETS UPDATE ----------
+# ---------- STEP 6 : GOOGLE SHEETS CONNECTION ----------
 
 creds_dict = json.loads(
     os.environ["GOOGLE_CREDENTIALS"]
@@ -85,10 +85,13 @@ gc = gspread.authorize(creds)
 
 sheet = gc.open("Laser_Data").sheet1
 
+
+# ---------- STEP 7 : GET EXISTING DATA ----------
+
 existing_data = sheet.get_all_records()
 
 
-# ---------- STEP 7 : HANDLE EMPTY SHEET ----------
+# ---------- STEP 8 : FIRST TIME UPLOAD ----------
 
 if not existing_data:
 
@@ -104,34 +107,66 @@ if not existing_data:
 
     print("First upload completed")
 
+
+# ---------- STEP 9 : DUPLICATE PREVENTION ----------
+
 else:
 
-    # Convert existing sheet data to DataFrame
-    existing_df = pd.DataFrame(existing_data)
-
-    # Make columns match properly
-    existing_df.columns = existing_df.columns.str.strip()
-
-    # Compare FULL ROWS to prevent duplicates
-    merged_df = df.merge(
-        existing_df,
-        how="left",
-        indicator=True
+    existing_df = pd.DataFrame(
+        existing_data
     )
 
-    # Keep only NEW rows
-    new_rows = merged_df[
-        merged_df["_merge"] == "left_only"
+    existing_df.columns = (
+        existing_df.columns.str.strip()
+    )
+
+    # IMPORTANT:
+    # Use unique combination
+    # beginTimestamp + job_name
+
+    required_columns = [
+        "beginTimestamp",
+        "job_name"
+    ]
+
+    for col in required_columns:
+
+        if col not in df.columns:
+            print(f"Missing column: {col}")
+            sys.exit()
+
+        if col not in existing_df.columns:
+            print(f"Missing column in sheet: {col}")
+            sys.exit()
+
+    # Convert to string for safe comparison
+    df["unique_key"] = (
+        df["beginTimestamp"].astype(str)
+        + "_"
+        + df["job_name"].astype(str)
+    )
+
+    existing_df["unique_key"] = (
+        existing_df["beginTimestamp"].astype(str)
+        + "_"
+        + existing_df["job_name"].astype(str)
+    )
+
+    # Keep only truly new rows
+    new_rows = df[
+        ~df["unique_key"].isin(
+            existing_df["unique_key"]
+        )
     ]
 
     # Remove helper column
     new_rows = new_rows.drop(
-        columns=["_merge"]
+        columns=["unique_key"]
     )
 
+    # Append only new rows
     if not new_rows.empty:
 
-        # Append only truly new rows
         sheet.append_rows(
             new_rows.values.tolist()
         )
