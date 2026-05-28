@@ -51,9 +51,121 @@ df.columns = df.columns.str.strip()
 print("Data cleaned")
 
 
-# ---------- STEP 5 : STORE IN SQLITE ----------
+# ---------- STEP 5 : DATETIME CONVERSION ----------
 
-conn = sqlite3.connect("laser_data.db")
+required_columns = [
+    "beginTimestamp",
+    "endTimestamp",
+    "job_name"
+]
+
+for col in required_columns:
+
+    if col not in df.columns:
+        print(f"Missing column: {col}")
+        sys.exit()
+
+df["beginTimestamp"] = pd.to_datetime(
+    df["beginTimestamp"]
+)
+
+df["endTimestamp"] = pd.to_datetime(
+    df["endTimestamp"]
+)
+
+print("Datetime conversion completed")
+
+
+# ---------- STEP 6 : CALCULATE RUNTIME ----------
+
+df["Runtime"] = (
+    df["endTimestamp"]
+    - df["beginTimestamp"]
+)
+
+# Runtime in Minutes
+df["Runtime in Min"] = (
+    df["Runtime"]
+    .dt.total_seconds() / 60
+).round(0)
+
+print("Runtime calculated")
+
+
+# ---------- STEP 7 : CALCULATE DOWNTIME ----------
+
+# Previous row end time
+previous_end = df["endTimestamp"].shift(1)
+
+# Downtime
+df["Downtime"] = (
+    df["beginTimestamp"]
+    - previous_end
+)
+
+# First row downtime = 0
+df.loc[0, "Downtime"] = pd.Timedelta(seconds=0)
+
+# Downtime in Minutes
+df["Downtime in Min"] = (
+    df["Downtime"]
+    .dt.total_seconds() / 60
+).fillna(0).round(0)
+
+# If downtime > 300 min → set 0
+df.loc[
+    df["Downtime in Min"] > 300,
+    "Downtime in Min"
+] = 0
+
+# Also reset downtime duration
+df.loc[
+    df["Downtime in Min"] == 0,
+    "Downtime"
+] = pd.Timedelta(seconds=0)
+
+print("Downtime calculated")
+
+
+# ---------- STEP 8 : EFFICIENCY ----------
+
+df["Efficiency"] = (
+    df["Runtime in Min"]
+    /
+    (
+        df["Runtime in Min"]
+        + df["Downtime in Min"]
+    )
+) * 100
+
+df["Efficiency"] = (
+    df["Efficiency"]
+    .fillna(100)
+    .round(2)
+)
+
+print("Efficiency calculated")
+
+
+# ---------- STEP 9 : FILTER COLUMN ----------
+
+df["Filter"] = df[
+    "Downtime in Min"
+].apply(
+    lambda x:
+    "Big Gap"
+    if x > 10
+    else "Normal"
+)
+
+print("Filter column created")
+
+
+# ---------- STEP 10 : STORE IN SQLITE ----------
+
+conn = sqlite3.connect(
+    "laser_data.db"
+)
 
 df.to_sql(
     "laser_records",
@@ -67,7 +179,7 @@ conn.close()
 print("SQLite updated")
 
 
-# ---------- STEP 6 : GOOGLE SHEETS CONNECTION ----------
+# ---------- STEP 11 : GOOGLE SHEETS CONNECTION ----------
 
 creds_dict = json.loads(
     os.environ["GOOGLE_CREDENTIALS"]
@@ -83,15 +195,17 @@ creds = Credentials.from_service_account_info(
 
 gc = gspread.authorize(creds)
 
-sheet = gc.open("Laser_Data").sheet1
+sheet = gc.open(
+    "Laser_Data"
+).sheet1
 
 
-# ---------- STEP 7 : GET EXISTING DATA ----------
+# ---------- STEP 12 : GET EXISTING DATA ----------
 
 existing_data = sheet.get_all_records()
 
 
-# ---------- STEP 8 : FIRST TIME UPLOAD ----------
+# ---------- STEP 13 : FIRST TIME UPLOAD ----------
 
 if not existing_data:
 
@@ -102,13 +216,15 @@ if not existing_data:
 
     # Add all rows
     sheet.append_rows(
-        df.values.tolist()
+        df.astype(str).values.tolist()
     )
 
-    print("First upload completed")
+    print(
+        "First upload completed"
+    )
 
 
-# ---------- STEP 9 : DUPLICATE PREVENTION ----------
+# ---------- STEP 14 : DUPLICATE PREVENTION ----------
 
 else:
 
@@ -120,26 +236,7 @@ else:
         existing_df.columns.str.strip()
     )
 
-    # IMPORTANT:
-    # Use unique combination
-    # beginTimestamp + job_name
-
-    required_columns = [
-        "beginTimestamp",
-        "job_name"
-    ]
-
-    for col in required_columns:
-
-        if col not in df.columns:
-            print(f"Missing column: {col}")
-            sys.exit()
-
-        if col not in existing_df.columns:
-            print(f"Missing column in sheet: {col}")
-            sys.exit()
-
-    # Convert to string for safe comparison
+    # Create unique key
     df["unique_key"] = (
         df["beginTimestamp"].astype(str)
         + "_"
@@ -152,7 +249,7 @@ else:
         + existing_df["job_name"].astype(str)
     )
 
-    # Keep only truly new rows
+    # Keep only new rows
     new_rows = df[
         ~df["unique_key"].isin(
             existing_df["unique_key"]
@@ -168,7 +265,8 @@ else:
     if not new_rows.empty:
 
         sheet.append_rows(
-            new_rows.values.tolist()
+            new_rows.astype(str)
+            .values.tolist()
         )
 
         print(
