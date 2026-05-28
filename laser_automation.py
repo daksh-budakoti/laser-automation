@@ -6,7 +6,6 @@ import json
 import sys
 
 from google.oauth2.service_account import Credentials
-from gspread_dataframe import set_with_dataframe
 
 from parse_laser_xml import parse_xml
 from gmail_fetch import fetch_latest_xml
@@ -33,12 +32,25 @@ rows, columns = parse_xml(
 print(f"Parsed {len(rows)} rows")
 
 
-# ---------- STEP 3 : STORE IN SQLITE ----------
+# ---------- STEP 3 : LOAD CSV ----------
 
 df = pd.read_csv("laser_output.csv")
 
+# ---------- STEP 4 : BASIC DATA CLEANING ----------
+
 # Replace empty values
 df = df.fillna("")
+
+# Remove duplicate rows
+df = df.drop_duplicates()
+
+# Clean column names
+df.columns = df.columns.str.strip()
+
+print("Data cleaned")
+
+
+# ---------- STEP 5 : STORE IN SQLITE ----------
 
 conn = sqlite3.connect("laser_data.db")
 
@@ -54,7 +66,7 @@ conn.close()
 print("SQLite updated")
 
 
-# ---------- STEP 4 : GOOGLE SHEETS UPDATE ----------
+# ---------- STEP 6 : GOOGLE SHEETS UPDATE ----------
 
 creds_dict = json.loads(
     os.environ["GOOGLE_CREDENTIALS"]
@@ -72,9 +84,18 @@ gc = gspread.authorize(creds)
 
 sheet = gc.open("Laser_Data").sheet1
 
-sheet.clear()
+existing_data = sheet.get_all_values()
 
-set_with_dataframe(sheet, df)
+# Add headers if sheet is empty
+if not existing_data:
+    sheet.append_row(
+        df.columns.tolist()
+    )
+
+# Append new rows below old data
+sheet.append_rows(
+    df.values.tolist()
+)
 
 print("Google Sheet updated")
 
