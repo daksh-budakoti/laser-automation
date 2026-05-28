@@ -36,12 +36,13 @@ print(f"Parsed {len(rows)} rows")
 
 df = pd.read_csv("laser_output.csv")
 
+
 # ---------- STEP 4 : BASIC DATA CLEANING ----------
 
 # Replace empty values
 df = df.fillna("")
 
-# Remove duplicate rows
+# Remove duplicate rows INSIDE current XML
 df = df.drop_duplicates()
 
 # Clean column names
@@ -84,20 +85,66 @@ gc = gspread.authorize(creds)
 
 sheet = gc.open("Laser_Data").sheet1
 
-existing_data = sheet.get_all_values()
+existing_data = sheet.get_all_records()
 
-# Add headers if sheet is empty
+
+# ---------- STEP 7 : HANDLE EMPTY SHEET ----------
+
 if not existing_data:
+
+    # Add headers
     sheet.append_row(
         df.columns.tolist()
     )
 
-# Append new rows below old data
-sheet.append_rows(
-    df.values.tolist()
-)
+    # Add all rows
+    sheet.append_rows(
+        df.values.tolist()
+    )
 
-print("Google Sheet updated")
+    print("First upload completed")
+
+else:
+
+    # Convert existing sheet data to DataFrame
+    existing_df = pd.DataFrame(existing_data)
+
+    # Make columns match properly
+    existing_df.columns = existing_df.columns.str.strip()
+
+    # Compare FULL ROWS to prevent duplicates
+    merged_df = df.merge(
+        existing_df,
+        how="left",
+        indicator=True
+    )
+
+    # Keep only NEW rows
+    new_rows = merged_df[
+        merged_df["_merge"] == "left_only"
+    ]
+
+    # Remove helper column
+    new_rows = new_rows.drop(
+        columns=["_merge"]
+    )
+
+    if not new_rows.empty:
+
+        # Append only truly new rows
+        sheet.append_rows(
+            new_rows.values.tolist()
+        )
+
+        print(
+            f"Added {len(new_rows)} new rows"
+        )
+
+    else:
+
+        print(
+            "No new data found"
+        )
 
 
 print("\nPipeline completed successfully")
