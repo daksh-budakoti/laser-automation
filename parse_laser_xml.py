@@ -126,8 +126,11 @@ def parse_xml(xml_path, output_csv=None):
         elem.clear()   # ← free memory after each record (critical for large files)
 
     if not all_rows:
-        print(f"[PARSER] WARNING: No <{RECORD_TAG}> records found. Check RECORD_TAG in config.")
-        return []
+        print(
+            f"[PARSER] WARNING: No <{RECORD_TAG}> records found. "
+            f"Check RECORD_TAG in config."
+        )
+        return [], []
 
     # Build final column order
     other_cols    = sorted([c for c in all_columns if c not in PRIORITY_COLS])
