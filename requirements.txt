@@ -1,8 +1,5 @@
 pandas
 gspread
-gspread-dataframe
 google-auth
-google-auth-oauthlib
-oauth2client
 imap-tools
 lxml
